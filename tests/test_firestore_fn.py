@@ -102,3 +102,47 @@ class TestFirestore(TestCase):
             decorated_func(raw_event)
 
             self.assertEqual(hello, "world")
+
+    def test_reuses_firestore_client_across_events(self):
+        with patch.dict("sys.modules", mocked_modules):
+            from cloudevents.http import CloudEvent
+
+            from firebase_functions import firestore_fn
+            from firebase_functions.private import path_pattern
+
+            firestore_fn._firestore_v1.Client.reset_mock()
+
+            func = Mock(__name__="example_func")
+            document_pattern = path_pattern.PathPattern("foo/{bar}")
+
+            def deliver(database):
+                # pylint: disable=protected-access
+                attributes = {
+                    "specversion": "1.0",
+                    "type": firestore_fn._event_type_created,
+                    "source": "https://example.com/testevent",
+                    "time": "2023-03-11T13:25:37.403Z",
+                    "subject": "test_subject",
+                    "datacontenttype": "application/json",
+                    "location": "projects/project-id/databases/(default)/documents/foo/{bar}",
+                    "project": "project-id",
+                    "namespace": "(default)",
+                    "document": "foo/{bar}",
+                    "database": database,
+                }
+                firestore_fn._firestore_endpoint_handler(
+                    func=func,
+                    event_type=firestore_fn._event_type_created,
+                    document_pattern=document_pattern,
+                    raw=CloudEvent(attributes=attributes, data=json.dumps({})),
+                )
+
+            # Databases are named per test so a client cached by another test
+            # can't make this pass.
+            for _ in range(3):
+                deliver("projects/project-id/databases/client-reuse")
+            self.assertEqual(firestore_fn._firestore_v1.Client.call_count, 1)
+
+            # A different database still needs its own client.
+            deliver("projects/project-id/databases/client-reuse-other")
+            self.assertEqual(firestore_fn._firestore_v1.Client.call_count, 2)
