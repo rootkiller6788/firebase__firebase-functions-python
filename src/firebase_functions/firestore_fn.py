@@ -105,6 +105,14 @@ _C3 = _typing.Callable[[_E3], None]
 _C4 = _typing.Callable[[_E4], None]
 
 
+# The client is only used to build document references and decode payloads, it
+# never reads from Firestore. Creating one resolves credentials, so doing it per
+# event adds a metadata server round trip to every delivery.
+@_functools.cache
+def _firestore_client(project: str, database: str) -> _firestore_v1.Client:
+    return _firestore_v1.Client(project=project, database=database)
+
+
 def _firestore_endpoint_handler(
     func: _C1 | _C2 | _C3 | _C4,
     event_type: str,
@@ -142,7 +150,7 @@ def _firestore_endpoint_handler(
     if _DEFAULT_APP_NAME not in _apps:
         initialize_app()
     app = get_app()
-    firestore_client = _firestore_v1.Client(project=app.project_id, database=event_database)
+    firestore_client = _firestore_client(app.project_id, event_database)
     firestore_ref: DocumentReference = firestore_client.document(event_document)
     value_snapshot: DocumentSnapshot | None = None
     old_value_snapshot: DocumentSnapshot | None = None
